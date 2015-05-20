@@ -2,9 +2,16 @@ package couchbase
 
 import (
 	"fmt"
+	"log"
 	"net/url"
+	"regexp"
+	"runtime"
 	"strings"
+	"time"
 )
+
+// Regex to extract just the function name (and not the module path)
+var RE_stripFnPreamble = regexp.MustCompile(`^.*\.(.*)$`)
 
 // CleanupHost returns the hostname with the given suffix removed.
 func CleanupHost(h, commonSuffix string) string {
@@ -46,4 +53,55 @@ func ParseURL(urlStr string) (result *url.URL, err error) {
 		err = fmt.Errorf("invalid URL <%s>", urlStr)
 	}
 	return
+}
+
+// Records the name of a function and the time of entry.  Intended to be used as:
+//   defer base.TraceExit(base.TraceEnter())
+// So that the base.TraceExit() -- which will be called when the calling function exits --
+// will get the function name and time it was entered, so it can calc the delta and log it.
+func TraceEnter() (functionName string, timeEntered time.Time) {
+
+	functionName = "<unknown>"
+	// Skip this function, and fetch the PC and file for its parent
+	pc, _, _, ok := runtime.Caller(1)
+	if ok {
+		functionName = RE_stripFnPreamble.ReplaceAllString(
+			runtime.FuncForPC(pc).Name(),
+			"$1",
+		)
+	}
+
+	return functionName, time.Now()
+
+}
+
+// Like TraceEnter, but allows you to pass an extra identifier.
+func TraceEnterExtra(extraIdentifier string) (functionName string, timeEntered time.Time) {
+
+	functionName = "<unknown>"
+	// Skip this function, and fetch the PC and file for its parent
+	pc, _, _, ok := runtime.Caller(1)
+	if ok {
+		functionName = RE_stripFnPreamble.ReplaceAllString(
+			runtime.FuncForPC(pc).Name(),
+			"$1",
+		)
+	}
+
+	if extraIdentifier != "" {
+		// attach the extra identifier if there is one
+		functionName = fmt.Sprintf("%v-%v", functionName, extraIdentifier)
+	}
+
+	return functionName, time.Now()
+
+}
+
+func TraceExit(functionName string, timeEntered time.Time) {
+
+	delta := time.Since(timeEntered)
+	if delta.Seconds() >= 1 {
+		log.Printf("%v() took %v seconds", functionName, delta.Seconds())
+	}
+
 }
