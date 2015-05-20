@@ -659,7 +659,7 @@ func (b *Bucket) Update(k string, exp int, callback UpdateFunc) error {
 func (b *Bucket) update(k string, exp int, callback UpdateFunc) (newCas uint64, err error) {
 	defer TraceExit(TraceEnterExtra("gocb-update"))
 
-	marker, enterTime := TraceEnterExtra("gocb-update_cas_loop")
+	marker, enterTime := TraceEnterExtra(fmt.Sprintf("gocb-update_cas_loop-docid:%v", k))
 
 	numUpdateAttempts := 0
 	var state memcached.CASState
@@ -673,7 +673,7 @@ func (b *Bucket) update(k string, exp int, callback UpdateFunc) (newCas uint64, 
 
 	delta := time.Since(enterTime)
 	if delta.Seconds() >= 1 {
-		log.Printf("%v() took %v seconds", marker, delta.Seconds())
+		log.Printf("%v() took %v seconds.  docid: %v", marker, delta.Seconds(), k)
 		log.Printf("%v() numUpdateAttempts: %v", marker, numUpdateAttempts)
 	}
 
@@ -749,17 +749,28 @@ var ErrTimeout = errors.New("timeout")
 // occur if the item isn't found durable in a reasonable amount of
 // time.
 func (b *Bucket) WaitForPersistence(k string, cas uint64, deletion bool) error {
+
 	timeout := 10 * time.Second
-	sleepDelay := 5 * time.Millisecond
+	sleepDelay := 5 * time.Millisecond // starts highter, chews up less connections
 	start := time.Now()
+	numIterations := 0
+
 	for {
+		numIterations += 1
+		if sleepDelay > time.Second {
+			log.Printf("gocb-waitforpersistence sleeping %v after %v attempts so far", sleepDelay, numIterations)
+		}
+
 		time.Sleep(sleepDelay)
 		sleepDelay += sleepDelay / 2 // multiply delay by 1.5 every time
 
+		markerObserve, enterTimeObserve := TraceEnterExtra("gocb-observe")
 		result, err := b.Observe(k)
+		TraceExit(markerObserve, enterTimeObserve)
 		if err != nil {
 			return err
 		}
+
 		if persisted, overwritten := result.CheckPersistence(cas, deletion); overwritten {
 			return ErrOverwritten
 		} else if persisted {
