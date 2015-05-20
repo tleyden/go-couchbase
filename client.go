@@ -657,13 +657,26 @@ func (b *Bucket) Update(k string, exp int, callback UpdateFunc) error {
 
 // internal version of Update that returns a CAS value
 func (b *Bucket) update(k string, exp int, callback UpdateFunc) (newCas uint64, err error) {
+	defer TraceExit(TraceEnterExtra("gocb-update"))
+
+	marker, enterTime := TraceEnterExtra("gocb-update_cas_loop")
+
+	numUpdateAttempts := 0
 	var state memcached.CASState
 	for b.casNext(k, exp, &state) {
 		var err error
+		numUpdateAttempts += 1
 		if state.Value, err = callback(state.Value); err != nil {
 			return 0, err
 		}
 	}
+
+	delta := time.Since(enterTime)
+	if delta.Seconds() >= 1 {
+		log.Printf("%v() took %v seconds", marker, delta.Seconds())
+		log.Printf("%v() numUpdateAttempts: %v", marker, numUpdateAttempts)
+	}
+
 	return state.Cas, state.Err
 }
 
@@ -677,8 +690,13 @@ type WriteUpdateFunc func(current []byte) (updated []byte, opt WriteOptions, err
 // document update has been persisted to disk and/or become available
 // to index.
 func (b *Bucket) WriteUpdate(k string, exp int, callback WriteUpdateFunc) error {
+	defer TraceExit(TraceEnterExtra("gocb-WriteUpdate"))
+
 	var writeOpts WriteOptions
 	var deletion bool
+
+	marker, enterTime := TraceEnterExtra("gocb-callupdate")
+
 	// Wrap the callback in an UpdateFunc we can pass to Update:
 	updateCallback := func(current []byte) (updated []byte, err error) {
 		update, opt, err := callback(current)
@@ -686,14 +704,20 @@ func (b *Bucket) WriteUpdate(k string, exp int, callback WriteUpdateFunc) error 
 		deletion = (update == nil)
 		return update, err
 	}
+
 	cas, err := b.update(k, exp, updateCallback)
+	TraceExit(marker, enterTime)
 	if err != nil {
 		return err
 	}
+
+	marker, enterTime = TraceEnterExtra("gocb-wait_for_persist_index")
 	// If callback asked, wait for persistence or indexability:
 	if writeOpts&(Persist|Indexable) != 0 {
 		err = b.WaitForPersistence(k, cas, deletion)
 	}
+	TraceExit(marker, enterTime)
+
 	return err
 }
 
