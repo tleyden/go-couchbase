@@ -248,6 +248,7 @@ func (b Bucket) getConnPool(i int) *connectionPool {
 // Given a vbucket number, returns a memcached connection to it.
 // The connection must be returned to its pool after use.
 func (b Bucket) getConnectionToVBucket(vb uint32) (*memcached.Client, *connectionPool, error) {
+	defer TraceExit(TraceEnterExtra("gocb-getConnectionToVbucket"))
 	for {
 		vbm := b.VBServerMap()
 		if len(vbm.VBucketMap) < int(vb) {

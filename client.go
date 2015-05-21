@@ -666,9 +666,11 @@ func (b *Bucket) update(k string, exp int, callback UpdateFunc) (newCas uint64, 
 	for b.casNext(k, exp, &state) {
 		var err error
 		numUpdateAttempts += 1
+		markerCallback, enterTimeCallback := TraceEnterExtra(fmt.Sprintf("gocb-casnext_callback-docid:%v", k))
 		if state.Value, err = callback(state.Value); err != nil {
 			return 0, err
 		}
+		TraceExit(markerCallback, enterTimeCallback)
 	}
 
 	delta := time.Since(enterTime)
